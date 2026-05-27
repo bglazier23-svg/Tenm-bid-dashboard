@@ -1,0 +1,361 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2869
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 import \{ useState, useRef, useEffect \} from "react";\
+import \{ createClient \} from "@supabase/supabase-js";\
+\
+const supabase = createClient(\
+  import.meta.env.VITE_SUPABASE_URL,\
+  import.meta.env.VITE_SUPABASE_ANON_KEY\
+);\
+\
+const sections = [\
+  \{ key:"thisWeek",  label:"Bids In This Week",    short:"This Week",  color:"#1D4ED8", light:"#DBEAFE", border:"#93C5FD", badge:"#2563EB", emoji:"\uc0\u55357 \u56523 " \},\
+  \{ key:"pending",   label:"Pending Decision",      short:"Pending",    color:"#B45309", light:"#FEF3C7", border:"#FCD34D", badge:"#D97706", emoji:"\uc0\u9203 " \},\
+  \{ key:"declined",  label:"Bids Declined",          short:"Declined",   color:"#B91C1C", light:"#FEE2E2", border:"#FCA5A5", badge:"#DC2626", emoji:"\uc0\u10060 " \},\
+  \{ key:"working",   label:"Accepted \'96 Working",    short:"Working",    color:"#065F46", light:"#D1FAE5", border:"#6EE7B7", badge:"#059669", emoji:"\uc0\u55357 \u56616 " \},\
+  \{ key:"submitted", label:"Accepted \'96 Submitted",  short:"Submitted",  color:"#5B21B6", light:"#EDE9FE", border:"#C4B5FD", badge:"#7C3AED", emoji:"\uc0\u9989 " \},\
+];\
+\
+const fmt = v => "$" + Number(v).toLocaleString();\
+const emptyBid = \{ project:"", client:"", value:"", dueDate:"", scope:"", estimator:"", section:"thisWeek", notes:"", startDate:"", submittedDate:"", plansLink:"" \};\
+const inputStyle = \{ width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #E2E8F0", fontSize:14, boxSizing:"border-box", outline:"none", fontFamily:"inherit" \};\
+const labelStyle = \{ display:"block", fontSize:11, fontWeight:700, color:"#64748B", marginBottom:4, textTransform:"uppercase", letterSpacing:"0.6px" \};\
+\
+export default function App() \{\
+  const [bids, setBids] = useState([]);\
+  const [loaded, setLoaded] = useState(false);\
+  const [saveStatus, setSaveStatus] = useState("idle");\
+  const [selected, setSelected] = useState(null);\
+  const [hovered, setHovered] = useState(null);\
+  const [addOpen, setAddOpen] = useState(false);\
+  const [form, setForm] = useState(emptyBid);\
+  const [editMode, setEditMode] = useState(false);\
+  const [editData, setEditData] = useState(null);\
+  const [dragId, setDragId] = useState(null);\
+  const [dragOver, setDragOver] = useState(null);\
+  const [showReset, setShowReset] = useState(false);\
+  const [online, setOnline] = useState(true);\
+\
+  useEffect(() => \{\
+    (async () => \{\
+      const \{ data, error \} = await supabase.from("bids").select("*").order("createdAt");\
+      if (!error) setBids(data || []);\
+      setLoaded(true);\
+    \})();\
+  \}, []);\
+\
+  useEffect(() => \{\
+    const channel = supabase.channel("bids-live")\
+      .on("postgres_changes", \{ event: "INSERT", schema: "public", table: "bids" \},\
+        (\{ new: row \}) => setBids(p => [...p.filter(b => b.id !== row.id), row]))\
+      .on("postgres_changes", \{ event: "UPDATE", schema: "public", table: "bids" \},\
+        (\{ new: row \}) => \{\
+          setBids(p => p.map(b => b.id === row.id ? row : b));\
+          setSelected(s => s?.id === row.id ? row : s);\
+        \})\
+      .on("postgres_changes", \{ event: "DELETE", schema: "public", table: "bids" \},\
+        (\{ old: row \}) => setBids(p => p.filter(b => b.id !== row.id)))\
+      .subscribe(status => setOnline(status === "SUBSCRIBED"));\
+    return () => supabase.removeChannel(channel);\
+  \}, []);\
+\
+  const flash = (ok) => \{ setSaveStatus(ok ? "saved" : "error"); setTimeout(() => setSaveStatus("idle"), 2000); \};\
+\
+  const addBid = async () => \{\
+    if (!form.project || !form.client) return;\
+    const bid = \{ ...form, id: crypto.randomUUID(), value: parseFloat(form.value) || 0, createdAt: new Date().toISOString() \};\
+    setSaveStatus("saving");\
+    const \{ error \} = await supabase.from("bids").insert([bid]);\
+    flash(!error);\
+    if (!error) \{ setForm(emptyBid); setAddOpen(false); \}\
+  \};\
+\
+  const saveEdit = async () => \{\
+    const updated = \{ ...editData, value: parseFloat(editData.value) || 0 \};\
+    setSaveStatus("saving");\
+    const \{ error \} = await supabase.from("bids").update(updated).eq("id", updated.id);\
+    flash(!error);\
+    if (!error) setEditMode(false);\
+  \};\
+\
+  const deleteBid = async (id) => \{\
+    setSaveStatus("saving");\
+    const \{ error \} = await supabase.from("bids").delete().eq("id", id);\
+    flash(!error);\
+    if (!error) setSelected(null);\
+  \};\
+\
+  const moveBid = async (id, toSection) => \{\
+    setSaveStatus("saving");\
+    const \{ error \} = await supabase.from("bids").update(\{ section: toSection \}).eq("id", id);\
+    flash(!error);\
+  \};\
+\
+  const onDragStart = (e, bid) => \{ setDragId(bid.id); e.dataTransfer.effectAllowed = "move"; \};\
+  const onDragEnd = () => \{ setDragId(null); setDragOver(null); \};\
+  const onDragOver = (e, k) => \{ e.preventDefault(); setDragOver(k); \};\
+  const onDragLeave = (e) => \{ if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(null); \};\
+  const onDrop = async (e, k) => \{\
+    e.preventDefault();\
+    if (dragId) await moveBid(dragId, k);\
+    setDragId(null); setDragOver(null);\
+  \};\
+\
+  const openPlans = (e, url) => \{ e.stopPropagation(); window.open(url, "_blank", "noopener"); \};\
+  const PlansBtn = (\{ url, large = false \}) => url ? (\
+    <button onClick=\{e => openPlans(e, url)\} style=\{\{ display:"inline-flex", alignItems:"center", gap:4, background:large?"#EFF6FF":"rgba(37,99,235,0.1)", color:"#2563EB", border:"1.5px solid #BFDBFE", borderRadius:6, padding:large?"8px 14px":"4px 8px", cursor:"pointer", fontSize:large?13:11, fontWeight:700, whiteSpace:"nowrap" \}\}>\
+      \uc0\u55357 \u56599  \{large ? "View Plans" : "Plans"\}\
+    </button>\
+  ) : null;\
+\
+  const SaveBadge = () => \{\
+    const map = \{ saving: ["#F59E0B","\uc0\u10227  Saving\'85"], saved: ["#10B981","\u10003  Saved"], error: ["#EF4444","\u9888  Error"], idle: [null,null] \};\
+    const [color, text] = map[saveStatus];\
+    if (!text) return null;\
+    return <span style=\{\{ fontSize:11, fontWeight:700, color, background:color+"22", padding:"3px 9px", borderRadius:20 \}\}>\{text\}</span>;\
+  \};\
+\
+  const bidFields = [\
+    ["Project Name","project","text"],["Client","client","text"],\
+    ["Bid Value ($)","value","number"],["Due Date","dueDate","text"],\
+    ["Project Scope","scope","text"],["Estimator","estimator","text"],\
+    ["Plans Link (URL)","plansLink","url"],["Notes","notes","text"]\
+  ];\
+\
+  if (!loaded) return (\
+    <div style=\{\{ display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", fontFamily:"system-ui", flexDirection:"column", gap:12, color:"#64748B" \}\}>\
+      <div style=\{\{ fontSize:40 \}\}>\uc0\u55356 \u57303 \u65039 </div>\
+      <div style=\{\{ fontWeight:700, fontSize:16 \}\}>Loading bid data\'85</div>\
+    </div>\
+  );\
+\
+  const totalPipeline = bids.reduce((s,b) => s + b.value, 0);\
+  const acceptedValue = bids.filter(b => b.section==="working"||b.section==="submitted").reduce((s,b) => s + b.value, 0);\
+  const winRate = bids.length ? Math.round(bids.filter(b => b.section==="working"||b.section==="submitted").length / bids.length * 100) : 0;\
+\
+  return (\
+    <div style=\{\{ fontFamily:"'Segoe UI',system-ui,sans-serif", background:"#F1F5F9", minHeight:"100vh", padding:"20px 24px" \}\}>\
+\
+      <div style=\{\{ background:"linear-gradient(135deg,#0F2044,#1D4ED8 60%,#4F46E5)", borderRadius:18, padding:"22px 28px", marginBottom:24, color:"white", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16, boxShadow:"0 8px 32px rgba(29,78,216,0.3)" \}\}>\
+        <div>\
+          <div style=\{\{ display:"flex", alignItems:"center", gap:10, marginBottom:4 \}\}>\
+            <span style=\{\{ fontSize:28 \}\}>\uc0\u55356 \u57303 \u65039 </span>\
+            <h1 style=\{\{ margin:0, fontSize:24, fontWeight:800 \}\}>Tenm Construction</h1>\
+            <SaveBadge />\
+            <span style=\{\{ fontSize:10, background:online?"#10B981":"#F59E0B", color:"white", borderRadius:20, padding:"2px 8px", fontWeight:700 \}\}>\{online?"\uc0\u9679  LIVE":"\u10227  \'85"\}</span>\
+          </div>\
+          <p style=\{\{ margin:0, opacity:0.75, fontSize:14 \}\}>Bid Dashboard</p>\
+        </div>\
+        <div style=\{\{ display:"flex", gap:14, flexWrap:"wrap" \}\}>\
+          \{[["Total Bids",bids.length],["Pipeline",fmt(totalPipeline)],["Accepted",fmt(acceptedValue)],["Win Rate",winRate+"%"]].map(([l,v]) => (\
+            <div key=\{l\} style=\{\{ textAlign:"center", background:"rgba(255,255,255,0.12)", borderRadius:10, padding:"10px 16px" \}\}>\
+              <div style=\{\{ fontSize:20, fontWeight:800, lineHeight:1 \}\}>\{v\}</div>\
+              <div style=\{\{ fontSize:11, opacity:0.75, marginTop:2 \}\}>\{l\}</div>\
+            </div>\
+          ))\}\
+        </div>\
+        <div style=\{\{ display:"flex", gap:8 \}\}>\
+          <button onClick=\{() => setAddOpen(true)\} style=\{\{ background:"rgba(255,255,255,0.18)", border:"1.5px solid rgba(255,255,255,0.45)", color:"white", borderRadius:10, padding:"10px 20px", cursor:"pointer", fontSize:14, fontWeight:700 \}\}>+ Add Bid</button>\
+          <button onClick=\{() => setShowReset(true)\} style=\{\{ background:"rgba(255,255,255,0.08)", border:"1.5px solid rgba(255,255,255,0.2)", color:"rgba(255,255,255,0.7)", borderRadius:10, padding:"10px 14px", cursor:"pointer", fontSize:13 \}\}>\uc0\u8634 </button>\
+        </div>\
+      </div>\
+\
+      \{dragId && <div style=\{\{ textAlign:"center", marginBottom:16, fontSize:13, color:"#64748B", fontWeight:600 \}\}>\uc0\u8597  Drop the tile into any section to move the bid</div>\}\
+\
+      \{sections.map(sec => \{\
+        const sb = bids.filter(b => b.section === sec.key);\
+        const sv = sb.reduce((s,b) => s + b.value, 0);\
+        const isDropTarget = dragOver === sec.key;\
+        const sameSection = bids.find(b => b.id === dragId)?.section === sec.key;\
+        return (\
+          <div key=\{sec.key\} onDragOver=\{e => onDragOver(e, sec.key)\} onDragLeave=\{onDragLeave\} onDrop=\{e => onDrop(e, sec.key)\}\
+            style=\{\{ marginBottom:24, borderRadius:16, border:isDropTarget&&!sameSection?`2.5px dashed $\{sec.badge\}`:"2.5px solid transparent", background:isDropTarget&&!sameSection?sec.light:"transparent", padding:isDropTarget&&!sameSection?"12px 12px 16px":"0", transition:"all 0.15s" \}\}>\
+            <div style=\{\{ display:"flex", alignItems:"center", gap:8, marginBottom:12 \}\}>\
+              <div style=\{\{ width:5, height:28, borderRadius:3, background:sec.badge \}\} />\
+              <span style=\{\{ fontSize:18 \}\}>\{sec.emoji\}</span>\
+              <h2 style=\{\{ margin:0, fontSize:17, fontWeight:800, color:sec.color \}\}>\{sec.label\}</h2>\
+              <span style=\{\{ background:sec.badge, color:"white", borderRadius:20, padding:"2px 9px", fontSize:12, fontWeight:700 \}\}>\{sb.length\}</span>\
+              \{sv > 0 && <span style=\{\{ marginLeft:"auto", fontSize:13, fontWeight:700, color:"#475569" \}\}>\{fmt(sv)\} total</span>\}\
+              \{isDropTarget && !sameSection && <span style=\{\{ marginLeft:sv>0?"8px":"auto", fontSize:12, fontWeight:700, color:sec.color \}\}>\uc0\u11015  Drop here</span>\}\
+            </div>\
+            <div style=\{\{ display:"flex", flexWrap:"wrap", gap:12 \}\}>\
+              \{sb.length === 0 ? (\
+                <div style=\{\{ background:"white", border:`2px dashed $\{sec.border\}`, borderRadius:12, padding:"16px 24px", color:"#94A3B8", fontSize:13, width:"100%", textAlign:"center" \}\}>\
+                  \{isDropTarget ? "\uc0\u55357 \u56524  Release to move here" : "No bids in this section"\}\
+                </div>\
+              ) : sb.map(bid => \{\
+                const isHov = hovered === bid.id && !dragId;\
+                const isDragging = dragId === bid.id;\
+                return (\
+                  <div key=\{bid.id\} draggable onDragStart=\{e => onDragStart(e, bid)\} onDragEnd=\{onDragEnd\}\
+                    onMouseEnter=\{() => !dragId && setHovered(bid.id)\} onMouseLeave=\{() => setHovered(null)\}\
+                    onClick=\{() => !dragId && setSelected(bid)\}\
+                    style=\{\{ background:isDragging?"#F1F5F9":isHov?sec.light:"white", border:`2px solid $\{isDragging?"#CBD5E1":isHov?sec.badge:sec.border\}`, borderRadius:14, padding:"14px 15px", width:210, cursor:isDragging?"grabbing":"grab", transition:"all 0.15s", transform:isDragging?"rotate(2deg) scale(0.97)":isHov?"translateY(-4px)":"none", boxShadow:isDragging?"none":isHov?`0 10px 28px $\{sec.badge\}2E`:"0 1px 5px rgba(0,0,0,0.07)", opacity:isDragging?0.5:1, position:"relative", userSelect:"none" \}\}>\
+                    <div style=\{\{ position:"absolute", top:8, right:8, fontSize:13, color:"#CBD5E1", letterSpacing:"-1px", lineHeight:1 \}\}>\uc0\u10303 \u10303 </div>\
+                    <div style=\{\{ fontSize:11, fontWeight:700, color:sec.badge, textTransform:"uppercase", letterSpacing:"0.6px", marginBottom:3 \}\}>\{sec.short\}</div>\
+                    <div style=\{\{ fontSize:14, fontWeight:700, color:"#1E293B", lineHeight:1.35, marginBottom:5, paddingRight:18 \}\}>\{bid.project\}</div>\
+                    <div style=\{\{ fontSize:12, color:"#64748B", marginBottom:5 \}\}>\uc0\u55357 \u56420  \{bid.client\}</div>\
+                    <div style=\{\{ fontSize:18, fontWeight:800, color:sec.badge, marginBottom:bid.plansLink?6:0 \}\}>\{fmt(bid.value)\}</div>\
+                    \{bid.plansLink && <PlansBtn url=\{bid.plansLink\} />\}\
+                    \{isHov && (\
+                      <div style=\{\{ borderTop:`1px solid $\{sec.border\}`, marginTop:9, paddingTop:8, fontSize:12, color:"#475569", display:"flex", flexDirection:"column", gap:4 \}\}>\
+                        <div>\uc0\u55357 \u56517  Due: <b>\{bid.dueDate\}</b></div>\
+                        <div>\uc0\u55357 \u56528  \{bid.scope\}</div>\
+                        <div>\uc0\u55357 \u56439  Est: <b>\{bid.estimator\}</b></div>\
+                        \{bid.notes && <div style=\{\{ color:"#DC2626", fontWeight:600 \}\}>\uc0\u9888 \u65039  \{bid.notes\}</div>\}\
+                        \{bid.startDate && <div style=\{\{ color:"#059669", fontWeight:600 \}\}>\uc0\u55356 \u57303 \u65039  Started: \{bid.startDate\}</div>\}\
+                        \{bid.submittedDate && <div style=\{\{ color:"#7C3AED", fontWeight:600 \}\}>\uc0\u55357 \u56548  Submitted: \{bid.submittedDate\}</div>\}\
+                        <div style=\{\{ marginTop:5, textAlign:"center", color:sec.badge, fontWeight:700, fontSize:11 \}\}>Click for full details \uc0\u8594 </div>\
+                      </div>\
+                    )\}\
+                  </div>\
+                );\
+              \})\}\
+            </div>\
+          </div>\
+        );\
+      \})\}\
+\
+      \{selected && (\
+        <div onClick=\{() => \{ setSelected(null); setEditMode(false); \}\} style=\{\{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20 \}\}>\
+          <div onClick=\{e => e.stopPropagation()\} style=\{\{ background:"white", borderRadius:20, padding:30, maxWidth:520, width:"100%", boxShadow:"0 30px 70px rgba(0,0,0,0.25)", maxHeight:"90vh", overflowY:"auto" \}\}>\
+            \{(() => \{\
+              const sec = sections.find(s => s.key === selected.section);\
+              return editMode ? (\
+                <>\
+                  <div style=\{\{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 \}\}>\
+                    <h2 style=\{\{ margin:0, fontSize:18, fontWeight:800 \}\}>\uc0\u9999 \u65039  Edit Bid</h2>\
+                    <button onClick=\{() => setEditMode(false)\} style=\{\{ background:"#F1F5F9", border:"none", borderRadius:8, width:34, height:34, cursor:"pointer", fontSize:18, color:"#64748B" \}\}>\'d7</button>\
+                  </div>\
+                  \{bidFields.map(([l,k,t]) => (\
+                    <div key=\{k\} style=\{\{ marginBottom:12 \}\}>\
+                      <label style=\{labelStyle\}>\{l\}</label>\
+                      <input type=\{t\} value=\{editData[k]||""\} onChange=\{e => setEditData(p => (\{...p,[k]:e.target.value\}))\} style=\{inputStyle\} placeholder=\{l\} />\
+                    </div>\
+                  ))\}\
+                  <div style=\{\{ marginBottom:20 \}\}>\
+                    <label style=\{labelStyle\}>Section</label>\
+                    <select value=\{editData.section\} onChange=\{e => setEditData(p => (\{...p,section:e.target.value\}))\} style=\{\{...inputStyle\}\}>\
+                      \{sections.map(s => <option key=\{s.key\} value=\{s.key\}>\{s.label\}</option>)\}\
+                    </select>\
+                  </div>\
+                  <div style=\{\{ display:"flex", gap:10 \}\}>\
+                    <button onClick=\{() => setEditMode(false)\} style=\{\{ flex:1, padding:"11px", borderRadius:10, border:"1.5px solid #E2E8F0", background:"white", cursor:"pointer", fontWeight:600, color:"#64748B" \}\}>Cancel</button>\
+                    <button onClick=\{saveEdit\} style=\{\{ flex:2, padding:"11px", borderRadius:10, border:"none", background:"linear-gradient(135deg,#2563EB,#7C3AED)", color:"white", cursor:"pointer", fontWeight:700, fontSize:15 \}\}>Save Changes</button>\
+                  </div>\
+                </>\
+              ) : (\
+                <>\
+                  <div style=\{\{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:18 \}\}>\
+                    <div>\
+                      <span style=\{\{ background:sec.light, color:sec.color, borderRadius:6, padding:"3px 10px", fontSize:11, fontWeight:700, display:"inline-block", marginBottom:8 \}\}>\{sec.emoji\} \{sec.label\}</span>\
+                      <h2 style=\{\{ margin:0, fontSize:20, fontWeight:800, color:"#1E293B" \}\}>\{selected.project\}</h2>\
+                    </div>\
+                    <button onClick=\{() => setSelected(null)\} style=\{\{ background:"#F1F5F9", border:"none", borderRadius:8, width:34, height:34, cursor:"pointer", fontSize:18, color:"#64748B" \}\}>\'d7</button>\
+                  </div>\
+                  <div style=\{\{ background:`linear-gradient(135deg,$\{sec.light\},white)`, border:`1.5px solid $\{sec.border\}`, borderRadius:14, padding:"14px 18px", marginBottom:16, display:"flex", justifyContent:"space-between", alignItems:"center" \}\}>\
+                    <div>\
+                      <div style=\{\{ fontSize:28, fontWeight:900, color:sec.badge \}\}>\{fmt(selected.value)\}</div>\
+                      <div style=\{\{ fontSize:12, color:"#64748B", fontWeight:600 \}\}>Bid Value</div>\
+                    </div>\
+                    \{selected.plansLink && <PlansBtn url=\{selected.plansLink\} large=\{true\} />\}\
+                  </div>\
+                  \{!selected.plansLink && (\
+                    <div style=\{\{ background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:10, padding:"9px 14px", marginBottom:14, fontSize:12, color:"#92400E" \}\}>\
+                      \uc0\u55357 \u56526  No plans link. <button onClick=\{() => \{ setEditData(\{...selected\}); setEditMode(true); \}\} style=\{\{ background:"none", border:"none", color:"#D97706", cursor:"pointer", fontWeight:700, fontSize:12, padding:0 \}\}>Add one \u8594 </button>\
+                    </div>\
+                  )\}\
+                  <div style=\{\{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 \}\}>\
+                    \{[["\uc0\u55356 \u57314  Client",selected.client],["\u55357 \u56439  Estimator",selected.estimator],["\u55357 \u56517  Due Date",selected.dueDate],["\u55357 \u56598  Bid ID","BID-"+String(selected.id).substring(0,6).toUpperCase()]].map(([l,v]) => (\
+                      <div key=\{l\} style=\{\{ background:"#F8FAFC", borderRadius:10, padding:"10px 14px" \}\}>\
+                        <div style=\{\{ fontSize:10, color:"#94A3B8", fontWeight:700, textTransform:"uppercase", marginBottom:3 \}\}>\{l\}</div>\
+                        <div style=\{\{ fontSize:13, fontWeight:600, color:"#1E293B" \}\}>\{v\}</div>\
+                      </div>\
+                    ))\}\
+                  </div>\
+                  <div style=\{\{ background:"#F8FAFC", borderRadius:10, padding:"12px 14px", marginBottom:12 \}\}>\
+                    <div style=\{\{ fontSize:10, color:"#94A3B8", fontWeight:700, textTransform:"uppercase", marginBottom:5 \}\}>\uc0\u55357 \u56528  Scope</div>\
+                    <div style=\{\{ fontSize:13, color:"#334155", lineHeight:1.5 \}\}>\{selected.scope\}</div>\
+                  </div>\
+                  \{selected.notes && <div style=\{\{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"10px 14px", marginBottom:12 \}\}>\
+                    <div style=\{\{ fontSize:10, color:"#DC2626", fontWeight:700, textTransform:"uppercase", marginBottom:4 \}\}>\uc0\u9888 \u65039  Notes</div>\
+                    <div style=\{\{ fontSize:13, color:"#7F1D1D" \}\}>\{selected.notes\}</div>\
+                  </div>\}\
+                  \{selected.startDate && <div style=\{\{ background:"#ECFDF5", border:"1px solid #A7F3D0", borderRadius:10, padding:"10px 14px", marginBottom:12 \}\}>\
+                    <div style=\{\{ fontSize:10, color:"#059669", fontWeight:700, textTransform:"uppercase", marginBottom:4 \}\}>\uc0\u55356 \u57303 \u65039  Start Date</div>\
+                    <div style=\{\{ fontSize:13, color:"#064E3B", fontWeight:600 \}\}>\{selected.startDate\}</div>\
+                  </div>\}\
+                  \{selected.submittedDate && <div style=\{\{ background:"#EDE9FE", border:"1px solid #C4B5FD", borderRadius:10, padding:"10px 14px", marginBottom:12 \}\}>\
+                    <div style=\{\{ fontSize:10, color:"#7C3AED", fontWeight:700, textTransform:"uppercase", marginBottom:4 \}\}>\uc0\u55357 \u56548  Submitted</div>\
+                    <div style=\{\{ fontSize:13, color:"#4C1D95", fontWeight:600 \}\}>\{selected.submittedDate\}</div>\
+                  </div>\}\
+                  <div style=\{\{ marginBottom:16 \}\}>\
+                    <div style=\{\{ fontSize:11, color:"#94A3B8", fontWeight:700, textTransform:"uppercase", marginBottom:8 \}\}>Move to Section</div>\
+                    <div style=\{\{ display:"flex", flexWrap:"wrap", gap:7 \}\}>\
+                      \{sections.filter(s => s.key !== selected.section).map(s => (\
+                        <button key=\{s.key\} onClick=\{() => moveBid(selected.id, s.key)\} style=\{\{ background:s.light, color:s.color, border:`1.5px solid $\{s.border\}`, borderRadius:7, padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:700 \}\}>\
+                          \{s.emoji\} \{s.short\}\
+                        </button>\
+                      ))\}\
+                    </div>\
+                  </div>\
+                  <div style=\{\{ display:"flex", gap:10 \}\}>\
+                    <button onClick=\{() => \{ setEditData(\{...selected\}); setEditMode(true); \}\} style=\{\{ flex:2, padding:"11px", borderRadius:10, border:"none", background:"linear-gradient(135deg,#2563EB,#4F46E5)", color:"white", cursor:"pointer", fontWeight:700, fontSize:14 \}\}>\uc0\u9999 \u65039  Edit</button>\
+                    <button onClick=\{() => deleteBid(selected.id)\} style=\{\{ flex:1, padding:"11px", borderRadius:10, border:"1.5px solid #FECACA", background:"#FEF2F2", color:"#DC2626", cursor:"pointer", fontWeight:700 \}\}>\uc0\u55357 \u56785 \u65039 </button>\
+                  </div>\
+                </>\
+              );\
+            \})()\}\
+          </div>\
+        </div>\
+      )\}\
+\
+      \{addOpen && (\
+        <div onClick=\{() => setAddOpen(false)\} style=\{\{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20 \}\}>\
+          <div onClick=\{e => e.stopPropagation()\} style=\{\{ background:"white", borderRadius:20, padding:30, maxWidth:460, width:"100%", maxHeight:"88vh", overflowY:"auto", boxShadow:"0 30px 70px rgba(0,0,0,0.25)" \}\}>\
+            <div style=\{\{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 \}\}>\
+              <h2 style=\{\{ margin:0, fontSize:20, fontWeight:800 \}\}>\uc0\u10133  Add New Bid</h2>\
+              <button onClick=\{() => setAddOpen(false)\} style=\{\{ background:"#F1F5F9", border:"none", borderRadius:8, width:34, height:34, cursor:"pointer", fontSize:18, color:"#64748B" \}\}>\'d7</button>\
+            </div>\
+            \{bidFields.map(([l,k,t]) => (\
+              <div key=\{k\} style=\{\{ marginBottom:12 \}\}>\
+                <label style=\{labelStyle\}>\{l\}</label>\
+                <input type=\{t\} placeholder=\{l\} value=\{form[k]\} onChange=\{e => setForm(p => (\{...p,[k]:e.target.value\}))\} style=\{inputStyle\} />\
+              </div>\
+            ))\}\
+            <div style=\{\{ marginBottom:20 \}\}>\
+              <label style=\{labelStyle\}>Section</label>\
+              <select value=\{form.section\} onChange=\{e => setForm(p => (\{...p,section:e.target.value\}))\} style=\{\{...inputStyle\}\}>\
+                \{sections.map(s => <option key=\{s.key\} value=\{s.key\}>\{s.label\}</option>)\}\
+              </select>\
+            </div>\
+            <div style=\{\{ display:"flex", gap:10 \}\}>\
+              <button onClick=\{() => setAddOpen(false)\} style=\{\{ flex:1, padding:"12px", borderRadius:10, border:"1.5px solid #E2E8F0", background:"white", cursor:"pointer", fontWeight:600, color:"#64748B" \}\}>Cancel</button>\
+              <button onClick=\{addBid\} style=\{\{ flex:2, padding:"12px", borderRadius:10, border:"none", background:"linear-gradient(135deg,#2563EB,#7C3AED)", color:"white", cursor:"pointer", fontWeight:700, fontSize:15 \}\}>Add Bid</button>\
+            </div>\
+          </div>\
+        </div>\
+      )\}\
+\
+      \{showReset && (\
+        <div onClick=\{() => setShowReset(false)\} style=\{\{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20 \}\}>\
+          <div onClick=\{e => e.stopPropagation()\} style=\{\{ background:"white", borderRadius:20, padding:32, maxWidth:380, width:"100%", textAlign:"center", boxShadow:"0 30px 70px rgba(0,0,0,0.25)" \}\}>\
+            <div style=\{\{ fontSize:40, marginBottom:12 \}\}>\uc0\u9888 \u65039 </div>\
+            <h2 style=\{\{ margin:"0 0 10px", fontSize:18, fontWeight:800 \}\}>Clear All Bids?</h2>\
+            <p style=\{\{ color:"#64748B", fontSize:14, marginBottom:24 \}\}>This will permanently delete ALL bids from the shared database.</p>\
+            <div style=\{\{ display:"flex", gap:10 \}\}>\
+              <button onClick=\{() => setShowReset(false)\} style=\{\{ flex:1, padding:"12px", borderRadius:10, border:"1.5px solid #E2E8F0", background:"white", cursor:"pointer", fontWeight:600, color:"#64748B" \}\}>Cancel</button>\
+              <button onClick=\{async () => \{ await supabase.from("bids").delete().neq("id","none"); setShowReset(false); \}\} style=\{\{ flex:1, padding:"12px", borderRadius:10, border:"none", background:"#DC2626", color:"white", cursor:"pointer", fontWeight:700 \}\}>Delete All</button>\
+            </div>\
+          </div>\
+        </div>\
+      )\}\
+\
+    </div>\
+  );\
+\}}
