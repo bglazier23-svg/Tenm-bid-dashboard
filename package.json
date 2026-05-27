@@ -1,3 +1,9 @@
+ild": "vite build",\n    "preview": "vite preview"\n  },\n  "dependencies": {\n    "react": "^18.2.0",\n    "react-dom": "^18.2.0",\n    "@supabase/supabase-js": "^2.39.0"\n  },\n  "devDependencies": {\n    "@vitejs/plugin-react": "^4.2.0",\n    "vite": "^5.0.0"\n  }\n}\n' > ~/Desktop/tenm-bid-dashboard/package.json
+TenM-MACBOOK-002-Brett-Glazier:~ brettglazier$ xxd ~/Desktop/tenm-bid-dashboard/package.json | head -3
+00000000: 7b0a 2020 226e 616d 6522 3a20 2274 656e  {.  "name": "ten
+00000010: 6d2d 6269 642d 6461 7368 626f 6172 6422  m-bid-dashboard"
+00000020: 2c0a 2020 2276 6572 7369 6f6e 223a 2022  ,.  "version": "
+TenM-MACBOOK-002-Brett-Glazier:~ brettglazier$ 
 {
   "name": "tenm-bid-dashboard",
   "version": "1.0.0",
