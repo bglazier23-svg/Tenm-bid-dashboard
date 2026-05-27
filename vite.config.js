@@ -1,16 +1,3 @@
-{\rtf1\ansi\ansicpg1252\cocoartf2869
-\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fnil\fcharset0 .AppleSystemUIFontMonospaced-Regular;\f1\fnil\fcharset0 HelveticaNeue;}
-{\colortbl;\red255\green255\blue255;\red219\green226\blue236;}
-{\*\expandedcolortbl;;\cssrgb\c88627\c90980\c94118;}
-\margl1440\margr1440\vieww11520\viewh8400\viewkind0
-\deftab720
-\pard\pardeftab720\partightenfactor0
-
-\f0\fs24 \cf2 \expnd0\expndtw0\kerning0
-\outl0\strokewidth0 \strokec2 import \{ defineConfig \} from 'vite'\
-import react from '@vitejs/plugin-react'\
-export default defineConfig(\{ plugins: [react()] \})\
-\pard\pardeftab560\slleading20\partightenfactor0
-
-\f1\fs26 \cf0 \kerning1\expnd0\expndtw0 \outl0\strokewidth0 \
-}
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+export default defineConfig({ plugins: [react()] })
